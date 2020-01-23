@@ -35,11 +35,6 @@ func main() {
 	// User join handler
 	// discord.AddHandler(onJoin)
 
-	err = loadSound()
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Loop to keep the bot alive
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
@@ -89,9 +84,7 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var args string
 
 	cmd := parts[1]
-	if len(parts) > 1 {
-		args = parts[2]
-	}
+	args = parts[2]
 
 	switch cmd {
 	case "poll":
@@ -103,28 +96,9 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	case "are":
 		s.ChannelMessageSend(m.ChannelID, "Nope.")
 	case "horn":
-		c, err := s.State.Channel(m.ChannelID)
+		err := JoinAndPlay(s, m, args)
 		if err != nil {
 			log.Println(err)
-		}
-
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			log.Println(err)
-		}
-		// Look for the message sender in that guild's current voice states.
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				err = playSound(s, g.ID, vs.ChannelID)
-				if err != nil {
-					fmt.Println("Error playing sound:", err)
-				}
-
-				return
-			}
-		}
-		if err != nil {
-			log.Fatal(err)
 		}
 	default:
 		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Invalid command: %s", cmd))

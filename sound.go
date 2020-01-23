@@ -1,18 +1,18 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/jonas747/dca"
+	"github.com/vmarkovtsev/go-lcss"
 )
 
 // JoinAndPlay connects to a voice channel and plays a sound
@@ -20,7 +20,8 @@ func JoinAndPlay(s *discordgo.Session, m *discordgo.MessageCreate, name string) 
 
 	// Only read the first thing as an argument
 	f := strings.SplitN(name, " ", 2)
-	buffer, err := loadSound(f[0])
+
+	sound, err := loadSound(f[0])
 	if err != nil {
 		return err
 	}
@@ -38,9 +39,9 @@ func JoinAndPlay(s *discordgo.Session, m *discordgo.MessageCreate, name string) 
 	// Look for the message sender in that guild's current voice states.
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
-			err = playSound(s, g.ID, vs.ChannelID, buffer)
+			err = playSound(s, g.ID, vs.ChannelID, sound)
 			if err != nil {
-				fmt.Println("Error playing sound:", err)
+				return fmt.Errorf("Error playing sound %s: %v", sound, err)
 			}
 			return nil
 		}
@@ -53,15 +54,12 @@ func JoinAndPlay(s *discordgo.Session, m *discordgo.MessageCreate, name string) 
 }
 
 // loadSound attempts to load an encoded sound file from disk.
-func loadSound(name string) ([][]byte, error) {
-	var buffer = make([][]byte, 0)
-	var file string
+func loadSound(name string) (string, error) {
+	const dir = "sounds"
 
-	const path = "sounds"
-
-	files, err := ioutil.ReadDir(path)
+	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	type kv struct {
@@ -71,12 +69,11 @@ func loadSound(name string) ([][]byte, error) {
 
 	// Iterate through all the sounds in sounds/ and find the one most
 	// like the `name` argument
-	var similarities map[string]int
+	similarities := make(map[string]int)
 
 	for _, f := range files {
 		base := filepath.Base(f.Name())
-		_ = base
-		similarities[f.Name()] = 0
+		similarities[f.Name()] = len(lcss.LongestCommonSubstring([]byte(base), []byte(name)))
 	}
 
 	var ss []kv
@@ -88,50 +85,11 @@ func loadSound(name string) ([][]byte, error) {
 		return ss[i].Value > ss[j].Value
 	})
 
-	file, err := os.Open(ss[0].Key)
-	if err != nil {
-		fmt.Println("Error opening dca file :", err)
-		return nil, err
-	}
-
-	var opuslen int16
-
-	for {
-		// Read opus frame length from dca file.
-		err = binary.Read(file, binary.LittleEndian, &opuslen)
-
-		// If this is the end of the file, just return.
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			err := file.Close()
-			if err != nil {
-				return nil, err
-			}
-			return nil, nil
-		}
-
-		if err != nil {
-			fmt.Println("Error reading from dca file :", err)
-			return nil, err
-		}
-
-		// Read encoded pcm from dca file.
-		InBuf := make([]byte, opuslen)
-		err = binary.Read(file, binary.LittleEndian, &InBuf)
-
-		// Should not be any end of file errors
-		if err != nil {
-			fmt.Println("Error reading from dca file :", err)
-			return nil, err
-		}
-
-		// Append encoded pcm data to the buffer.
-		buffer = append(buffer, InBuf)
-	}
-	return buffer, nil
+	return filepath.Join(dir, ss[0].Key), nil
 }
 
 // playSound plays the current buffer to the provided channel.
-func playSound(s *discordgo.Session, guildID, channelID string, buffer [][]byte) error {
+func playSound(s *discordgo.Session, guildID, channelID, sound string) error {
 
 	// Join the provided voice channel.
 	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
@@ -145,10 +103,21 @@ func playSound(s *discordgo.Session, guildID, channelID string, buffer [][]byte)
 	// Start speaking.
 	vc.Speaking(true)
 
-	// Send the buffer data.
-	for _, buff := range buffer {
-		vc.OpusSend <- buff
+	// if filepath.Ext(sound) != "dca" {
+	encoder, err := dca.EncodeFile(sound, dca.StdEncodeOptions)
+	if err != nil {
+		return fmt.Errorf("Error encoding file %s to DCA: %v", sound, err)
 	}
+	defer encoder.Cleanup()
+
+	done := make(chan error)
+
+	dca.NewStream(encoder, vc, done)
+	err = <-done
+	if err != nil && err != io.EOF {
+		return err
+	}
+	// }
 
 	// Stop speaking
 	vc.Speaking(false)

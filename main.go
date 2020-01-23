@@ -84,6 +84,9 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	var args string
 
 	cmd := parts[1]
+	if len(parts) < 3 {
+		parts = append(parts, "")
+	}
 	args = parts[2]
 
 	switch cmd {
@@ -95,7 +98,7 @@ func onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	case "are":
 		s.ChannelMessageSend(m.ChannelID, "Nope.")
-	case "horn":
+	case "play":
 		err := JoinAndPlay(s, m, args)
 		if err != nil {
 			log.Println(err)

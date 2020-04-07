@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,12 +11,45 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/jonas747/dca"
+	"github.com/pkg/errors"
 	"github.com/vmarkovtsev/go-lcss"
 )
 
-// JoinAndPlay connects to a voice channel and plays a sound
-func JoinAndPlay(s *discordgo.Session, m *discordgo.MessageCreate, name string) error {
+// VoiceConnection contains the actual session and some info about the voice channel
+type VoiceConnection struct {
+	s       *discordgo.Session
+	guild   string
+	channel string
+}
 
+// JoinAndPlay connects to a voice channel and plays a sound
+func JoinAndPlay(s *discordgo.Session, guildID, channelID, name string) error {
+
+	conn := VoiceConnection{
+		s:       s,
+		guild:   guildID,
+		channel: channelID,
+	}
+
+	switch name {
+	case "wow":
+		return nil
+	default:
+		err := playLocal(conn, name)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// playWow plays searches the WoWHead DB and plays the cloest sound
+func playWow(conn VoiceConnection, name string) error {
+	return nil
+}
+
+// playLocal plays a local sound file from the `sounds` directory
+func playLocal(conn VoiceConnection, name string) error {
 	// Only read the first thing as an argument
 	f := strings.SplitN(name, " ", 2)
 
@@ -26,30 +58,11 @@ func JoinAndPlay(s *discordgo.Session, m *discordgo.MessageCreate, name string) 
 		return err
 	}
 
-	c, err := s.State.Channel(m.ChannelID)
-	if err != nil {
-		log.Println(err)
-	}
-
-	g, err := s.State.Guild(c.GuildID)
-	if err != nil {
-		log.Println(err)
-	}
-
 	// Look for the message sender in that guild's current voice states.
-	for _, vs := range g.VoiceStates {
-		if vs.UserID == m.Author.ID {
-			err = playSound(s, g.ID, vs.ChannelID, sound)
-			if err != nil {
-				return fmt.Errorf("Error playing sound %s: %v", sound, err)
-			}
-			return nil
-		}
-	}
+	err = playSound(conn, sound)
 	if err != nil {
-		log.Fatal(err)
+		return errors.Wrap(err, "error playing sound")
 	}
-
 	return nil
 }
 
@@ -89,10 +102,10 @@ func loadSound(name string) (string, error) {
 }
 
 // playSound plays the current buffer to the provided channel.
-func playSound(s *discordgo.Session, guildID, channelID, sound string) error {
+func playSound(conn VoiceConnection, sound string) error {
 
 	// Join the provided voice channel.
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+	vc, err := conn.s.ChannelVoiceJoin(conn.guild, conn.channel, false, true)
 	if err != nil {
 		return err
 	}
